@@ -35,7 +35,7 @@ def ramp_fitting_4d(input_data):
     for integration in integrations:
         input_cube = RampInput3d(None, input_data, integration)
         return_cube_data = ramp_fitting_3d(input_cube)
-        integration_data.append(return_data)
+        integration_data.append(return_cube_data)
 
     ramp_out_4d = compute_across_integrations(input_data, integration_data)
     return ramp_out_4d
@@ -62,7 +62,9 @@ def ramp_fitting_3d(cube_data):
     ramp_out_3d: RampOutput3d
         Contains all the computations of ramp fitting of all pixels acros all groups.
     """
-    # Maybe take advantage of
+    # Add accounting steps to transform uint16 data to float32 data to compute OLS.
+    # Add accounting steps to modify the float32 to account for saturation and
+    #     jump detection (cosmic rays).
     if cube_data.multiprocessing != "None":
         raise ValueError("Ramp fitting multiprocessing not implemented, yet.")
 
@@ -70,10 +72,16 @@ def ramp_fitting_3d(cube_data):
         rows_per_slice = cube_data.data_3d.shape[1] / (number_slices - 1)
 
         # Break the cube up by rows and multiprocess row sets.
+        # Create a list of tuples of beginning and ending row to be computed
+        #    each processor.
+
+        # Set up the first k-1 slices
         slices = [
             (k * rows_per_slice, (k + 1) * row_per_slice)
             for k in range(number_slices - 1)
         ]
+
+        # Set up the last slice
         last_slice = slices[-1]
         last_row = last_slice[0]
         last_rows = cube_data.data_3d.shape[1]
@@ -108,15 +116,25 @@ def ramp_fitting_pixels(cube_data, row_start, row_end):
     """
     output = RampOutput3d()
     # Create output data structure/class
-    for row in range(row_start, row_end, 1):
+    for row in range(row_start, row_end):
         # Process each pixel in a row
         for col in cube_data.data_3d.shape[2]:
             # Proces each pixel
-            ret = ramp_fitting_pixels(output_3d, cube_data, row, col)
+            ret = ramp_fitting_pixel(output_3d, cube_data, row, col)
     return output
 
 
 def ramp_fitting_pixel(output_3d, cube_data, row, col):
+    """
+    Computes ramp fitting for a particular pixel over all groups, accounting for
+    cosmic rays (CRs) and saturation points.
+
+    Parameter
+    ---------
+
+    Return
+    ------
+    """
     pixel = cube_data.data_3d[:, row, col]
     # Find segments
     # Compute least squares for each segment

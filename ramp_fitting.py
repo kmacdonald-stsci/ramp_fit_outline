@@ -13,7 +13,32 @@ from ramp_fitting_classes import RampOutput3d
 DELIM = "-" * 70
 
 
-def ramp_fitting_4d(input_data):
+def ramp_fitting_4d(model, buffsz, save_opt, noise, gain, algo, wt, cores):
+    """
+    model
+    buffsz
+    save_opt
+    noise
+    gain
+    algo
+    wt
+    cores
+    """
+    if cores != "none":
+        # Future: multiprocessing
+        return None * 4
+    return ramp_fitting_4d_single(model, buffsz, save_opt, noise, gain, algo, wt, cores)
+
+def ramp_fitting_4d_single(model, buffsz, save_opt, noise, gain, algo, wt, cores):
+    # MIRI Accounting
+    # Mark segments
+    # Choose OLS or GLS
+    
+
+
+
+# ------------------------------------------------------------------------
+def ramp_fitting_4d_old(input_data=None, options={}):
     """
     Computes ramp fitting for a 4-D data cube.  It computes the ramp fit
     for each pixel in each integration then computes the total ramp fit
@@ -34,14 +59,14 @@ def ramp_fitting_4d(input_data):
     integration_data = []
     for integration in integrations:
         input_cube = RampInput3d(None, input_data, integration)
-        return_cube_data = ramp_fitting_3d(input_cube)
+        return_cube_data = ramp_fitting_3d(input_cube, options)
         integration_data.append(return_cube_data)
 
     ramp_out_4d = compute_across_integrations(input_data, integration_data)
     return ramp_out_4d
 
 
-def ramp_fitting_3d(cube_data):
+def ramp_fitting_3d(cube_data, options={}):
     """
     Compute ramp fit for each pixel over the groups.  This is done taking into account
     saturation and cosmic rays.  A pixel segment over a group is defined as a set of

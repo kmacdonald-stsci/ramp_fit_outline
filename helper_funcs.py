@@ -111,6 +111,26 @@ def setup_inputs(
     return model, rnModel, gain
 
 
+def setup_inputs_simplified(noise=None, dims=None, exposure=None):
+    if noise is None:
+        readnoise, gain_level = 10, 1
+    else:
+        readnoise, gain_level = noise
+
+    if dims is None:
+        nints, ngroups, nrows, ncols = 1, 10, 103, 102
+    else:
+        nints, ngroups, nrows, ncols = dims
+
+    if exposure is None:
+        nframes, grouptime, deltatime = 1, 1.0, 1
+    else:
+        nframes, grouptime, deltatime = exposure
+
+    return setup_inputs(
+        readnoise, gain_level, nints, ngroups, nrows, ncols, nframes, grouptime, deltatime)
+
+
 if __name__=="__main__":
     rn, g, ni, ng, nr, nc, nf, gr, dt = 10, 1, 1, 3, 2, 2, 1, 1.0, 1
     model, rnModel, gain = setup_inputs(

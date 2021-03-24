@@ -1,63 +1,5 @@
 https://jwst-pipeline.readthedocs.io/en/latest/jwst/ramp_fitting/description.html
 
-                SPECIAL CASES
-1. If for each n_int ngroups == 1:
-       if pixel is not saturated:
-           rate_count = pixel / group_time
-
-3. If for each n_int ngroups == 2:
-       if pixel is not saturated in each group:
-           rate_count = (pixel[1] - pixel[0]) / group_time
-
-3. If for each n_int ngroups > 1:
-       1. Segment has ngroups == 1
-              if nsegs == 1:
-                  rate_count = pixel / group_time
-              if nsegs > 1 and ngroups > 1 in other segment:
-                  segement with length 1 is ignored
-
-       2. If pixel[0] is valid and pixel[k] is saturated for all k > 0:
-              first_diff = pixel[0]
-
-       3. If pixel[1] is saturated:
-              rate_count = pixel[0] / group_time
-
-4. MIRI correction step removes pixel[0] and pixel[-1], so the actual
-   ngroups = orig_ngroups - 2.
-       if ngroups < 2:
-           log warning
-
-
-
-                PRODUCTS
-    Primary product:
-1. 2-D: SCI - pixel slopes computed using weighted segment slopes and integrations.
-2. 2-D: GROUPDQ - bitwise "or" over integrations and groups.
-3. 2-D: The 3-D VAR_POISSON averaged over all integrations to 2-D.
-4. 2-D: The 3-D VAR_RNOISE averaged over all integrations to 2-D.
-
-    rateints product (per integration products):
-1. 3-D: SCI - pixel slopes computed using weighted segment slopes.
-2. 2-D: GROUPDQ - bitwise "or" over groups and integrations.
-3. 3-D: The 4-D VAR_POISSON averaged over all fit segments in an integration to 3-D.
-4. 3-D: The 4-D VAR_RNOISE averaged over all fit segments in an integration to 3-D.
-5. 3-D: ERR - 
-
-    Optional output (from save_opt flag); data from each segement for each pixel:
-    * should "segment" above read "group"?
-1. 4-D: SLOPE - slopes
-2. 4-D: SIGSLOPE - uncertainty in the slopes
-3. 4-D: YINT - y-intecepts
-4. 4-D: SIGYINT - uncertainty in the y-intecepts
-5. 4-D: WEIGHTS - fitting weights
-6. 4-D: VAR_POISSON - variance of the slope due to poisson noise
-7. 4-D: VAR_NOISE - variance of the slope due to read noise
-8. 3-D: PEDESTAL - the signal at zero exposure time for each pixel
-            - Computed using fitted data, setting exposure time to 0. 
-              (*note: How is this different from y-intercepts?)
-            - Any saturated pixel, this value is 0. 
-9. 4-D: CRMAG - the magnitude of each group flagged as having a cosmic ray hit
-
 
                 SLOPE AND VARIANCE CALCULATIONS
 Notation:
@@ -106,6 +48,7 @@ var[P, S] = est_slope / (trgroup * gain * (ngroups[S] - 1))
     - est_slope = median(first differences unaffected by saturation and cosmic 
                          rays in integrations)
     - ngroups[S] = the number of groups in the segment
+        - When ngroups[S]==1 replace (ngroups[S] - 1) with 1
     - tgroup = group time in seconds
 
 
@@ -179,3 +122,64 @@ ERR - the square root of the exposure-level combined variances
 VAR_POISSON
 VAR_RNOISE
 
+
+**********************************************************************
+
+                SPECIAL CASES
+1. If for each n_int ngroups == 1:
+       if pixel is not saturated:
+           rate_count = pixel / group_time
+
+3. If for each n_int ngroups == 2:
+       if pixel is not saturated in each group:
+           rate_count = (pixel[1] - pixel[0]) / group_time
+
+3. If for each n_int ngroups > 1:
+       1. Segment has ngroups == 1
+              if nsegs == 1:
+                  rate_count = pixel / group_time
+              if nsegs > 1 and ngroups > 1 in other segment:
+                  segement with length 1 is ignored
+
+       2. If pixel[0] is valid and pixel[k] is saturated for all k > 0:
+              first_diff = pixel[0]
+
+       3. If pixel[1] is saturated:
+              rate_count = pixel[0] / group_time
+
+4. MIRI correction step removes pixel[0] and pixel[-1], so the actual
+   ngroups = orig_ngroups - 2.
+       if ngroups < 2:
+           log warning
+
+
+**********************************************************************
+
+                PRODUCTS
+    Primary product:
+1. 2-D: SCI - pixel slopes computed using weighted segment slopes and integrations.
+2. 2-D: GROUPDQ - bitwise "or" over integrations and groups.
+3. 2-D: The 3-D VAR_POISSON averaged over all integrations to 2-D.
+4. 2-D: The 3-D VAR_RNOISE averaged over all integrations to 2-D.
+
+    rateints product (per integration products):
+1. 3-D: SCI - pixel slopes computed using weighted segment slopes.
+2. 2-D: GROUPDQ - bitwise "or" over groups and integrations.
+3. 3-D: The 4-D VAR_POISSON averaged over all fit segments in an integration to 3-D.
+4. 3-D: The 4-D VAR_RNOISE averaged over all fit segments in an integration to 3-D.
+5. 3-D: ERR - 
+
+    Optional output (from save_opt flag); data from each segement for each pixel:
+    * should "segment" above read "group"?
+1. 4-D: SLOPE - slopes
+2. 4-D: SIGSLOPE - uncertainty in the slopes
+3. 4-D: YINT - y-intecepts
+4. 4-D: SIGYINT - uncertainty in the y-intecepts
+5. 4-D: WEIGHTS - fitting weights
+6. 4-D: VAR_POISSON - variance of the slope due to poisson noise
+7. 4-D: VAR_NOISE - variance of the slope due to read noise
+8. 3-D: PEDESTAL - the signal at zero exposure time for each pixel
+            - Computed using fitted data, setting exposure time to 0. 
+              (*note: How is this different from y-intercepts?)
+            - Any saturated pixel, this value is 0. 
+9. 4-D: CRMAG - the magnitude of each group flagged as having a cosmic ray hit

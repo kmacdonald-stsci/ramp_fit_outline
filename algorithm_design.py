@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+"""
+Based on:
+https://jwst-pipeline.readthedocs.io/en/latest/jwst/ramp_fitting/description.html
+"""
+
 import multiprocessing
 import sys
 import warnings
@@ -14,8 +19,9 @@ from algorithm_design_classes import ModelArray
 from algorithm_design_classes import RampSegment
 
 from jwst.datamodels import dqflags
+from jwst.datamodels import GainModel
 from jwst.datamodels import RampModel
-from jwst.datamodels import GainModel, ReadnoiseModel
+from jwst.datamodels import ReadnoiseModel
 
 DO_NOT_USE = dqflags.group["DO_NOT_USE"]
 JUMP_DET = dqflags.group["JUMP_DET"]
@@ -24,10 +30,10 @@ SATURATED = dqflags.group["SATURATED"]
 DELIM = "-" * 70
 SDELIM = "*" * 70
 
-"""
-Receive 4-D RampModel with processing information:
-"""
 
+# --------------------------------------------------------------------
+#                        Primary Function
+# --------------------------------------------------------------------
 def ramp_fit(model, proc_options):
     """
     Top level ramp fitting designed for 4-D processing  with dimensions:
@@ -43,14 +49,13 @@ def ramp_fit(model, proc_options):
 
     Return
     ------
-    TODO
-    primary: RampModel (or ImageModel <--- will have to check this)
+    primary:ImageModel
         The primary ramp fitting product.
 
-    rateint: (Need to check what type this is)
+    rateint: TODO (Need to check what type this is)
         Flesh out details
-    
-    optres:
+
+    optres: TODO
         Flesh out details
     """
     icomp = IntermediateComputations(model.data)
@@ -64,28 +69,67 @@ def ramp_fit(model, proc_options):
 
 
 # --------------------------------------------------------------------
-
+#                          Helper Functions
+# --------------------------------------------------------------------
 def across_integration_ramp_fitting(model, proc_options, icomp):
     """
     Fits each ramp in each integration, then computes fit over all
     integrations.
+
+    Parameter
+    ---------
+    model: RampModel
+        Contains the information needed to fit ramps.
+
+    proc_options: dict
+        Contains processing information
+
+    Return
+    ------
+    primary:ImageModel
+        The primary ramp fitting product.
+
+    rateint: TODO (Need to check what type this is)
+        Flesh out details
+
+    optres: TODO
+        Flesh out details
     """
     slope_est = compute_slope_est(model, icomp)
 
     primary_int = []
     rateint_int = []
     optres_int = []
+    """
     for integration in range(model.data.shape[0]):
         model_3d, icomp_3d = get_integration(model, icomp, integration)
         primary, rateint, optres = ramp_fit_3d(model_3d, proc_options, icomp_3d)
         primary_int.append(primary)
         rateint_int.append(rateint)
         optres_int.append(optres)
+    """
 
-    return combine_integrations(primary_int, rateint_int, optres_int)
+    primary, rateint, optres = combine_integrations(
+        primary_int, rateint_int, optres_int)
+
+    return primary, rateint, optres
 
 
 def combine_integrations(primary_int, rateint_int, optres_int):
+    """
+    primary_int: list
+        Contains the primary product for each integration
+
+    rateint_int: list
+        Contains the rateint product for each integration
+
+    optres_int: list
+        Contains the optional results for each integration
+    """
+    if len(primary_int) == 1:
+        return primary_int[0], rateint_int[0], optres_int[0]
+
+    # TODO Combine integration level info into exposure level info
     return None, None, None
 
 
@@ -114,7 +158,7 @@ def compute_first_diffs(data, groupdq):
     # If the dataset has only 1 group/integ, assume the 'previous group'
     #   is all zeros, so just use data as the difference
     if first_diffs.shape[0] == 0:
-        first_diffs= data.copy()
+        first_diffs = data.copy()
     else:
         # Similarly, for datasets having >1 group/integ and having
         #   single-group segments, just use the data as the difference
@@ -129,7 +173,11 @@ def compute_first_diffs(data, groupdq):
         #   starting at group 1.  The purpose of starting at index 1 is
         #   to shift all the indices down by 1, so they line up with the
         #   indices in first_diffs.
-        i_group, i_yy, i_xx, = np.where(np.bitwise_and(groupdq[1:, :, :], JUMP_DET))
+        (
+            i_group,
+            i_yy,
+            i_xx,
+        ) = np.where(np.bitwise_and(groupdq[1:, :, :], JUMP_DET))
         first_diffs[i_group - 1, i_yy, i_xx] = np.NaN
 
         del i_group, i_yy, i_xx
@@ -139,8 +187,11 @@ def compute_first_diffs(data, groupdq):
         #   few good groups past the 0th. Due to the shortage of good
         #   data, the first_diffs will be set here equal to the data in
         #   the 0th group.
-        wh_min = np.where(np.logical_and(
-            np.isnan(first_diffs).all(axis=0), np.isfinite(data[0, :, :])))
+        wh_min = np.where(
+            np.logical_and(
+                np.isnan(first_diffs).all(axis=0), np.isfinite(data[0, :, :])
+            )
+        )
         if len(wh_min[0] > 0):
             first_diffs[0, :, :][wh_min] = data[0, :, :][wh_min]
 
@@ -200,8 +251,12 @@ def compute_pixel_ramp(model, proc_options, icomp, row, col):
     """
     # HERE
     ramp = ModelArray(
-        model, model.data[:, row, col], model.err[:, row, col], 
-        model.groupdq[:, row, col], model.pixeldq[row, col])
+        model,
+        model.data[:, row, col],
+        model.err[:, row, col],
+        model.groupdq[:, row, col],
+        model.pixeldq[row, col],
+    )
 
     # compute segments
     ans = compute_segments_fits(ramp, proc_options, icomp, row, col)
@@ -219,7 +274,7 @@ def compute_segments_fits(ramp, proc_options, icomp, row, col):
 
 def compute_slope_est(model, icomp):
     """
-    Estimate the slope using the median differences over each integration.
+    Estimate the slope using the median group differences over each integration.
 
     Parameter
     ---------
@@ -232,7 +287,7 @@ def compute_slope_est(model, icomp):
         The slope estimates using the median differences between groups
         not affected by across all integrations.
     """
-    number_of_integrations, ngroups, nrows, ncols = model.data.shape[0]
+    number_of_integrations, ngroups, nrows, ncols = model.data.shape
     slope_est = np.zeros((nrows, ncols))
     for integration in range(number_of_integrations):
         data = model.data[integration, :, :, :]
@@ -250,13 +305,17 @@ def compute_slope_est(model, icomp):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "All-NaN.*", RuntimeWarning)
             nan_med = np.nanmedian(first_diffs, axis=0)
-        nan_med[np.isnan(nan_med)] = 0.  # if all first_diffs_sect are nans
+        nan_med[np.isnan(nan_med)] = 0.0  # if all first_diffs_sect are nans
         slope_est[:, :] += nan_med
+
         del nan_med
+        del first_diffs
 
     # Save estimated slopes
     slope_est /= number_of_integrations
     slope_est /= model.orig_model.meta.exposure.group_time
+
+    return slope_est
 
 
 def get_integration(model, icomp, n_int):
@@ -351,12 +410,12 @@ def ramp_fit_3d(model, proc_options, icomp):
         The intermediate computations.
     """
     # TODO
-    '''
+    """
     ngroups, nrows, ncols = model.data.shape
     for row in range(nrows):
         for col in range(ncols):
             ans = compute_pixel_ramp(model, proc_options, icomp, row, col)
-    '''
+    """
     ans = compute_pixel_ramp(model, proc_options, icomp, 0, 0)
 
     return None, None, None
@@ -386,7 +445,7 @@ def ramp_fit_4d(model, proc_options, icomp):
 
     rateint: (Need to check what type this is)
         Flesh out details
-    
+
     optres:
         Flesh out details
     """
@@ -441,27 +500,30 @@ def test_compute_multiprocessing_slices():
 
 
 def test_ramp_fit():
-    proc_options = {"max_cores":  "none"}
+    proc_options = {"max_cores": "none"}
 
     dims = (2, 5, 1, 2)
     model, rnModel, gain = setup_inputs_simplified(dims=dims)
 
     print(DELIM)
-    print(f"Dimensions = {dims}");
-    ramp = np.array([k+1 for k in range(dims[1])])
+    print(f"Dimensions = {dims}")
+    print(DELIM)
+    ramp = np.array([k + 1 for k in range(dims[1])])
 
     # Integration 0
-    # model.data[0, :, 0, 0] = ramp * 5 + 5
-    model.data[0, :, 0, 0] = np.array([10. ,15., 65., 70., 75.])
+    model.data[0, :, 0, 0] = np.array([10.0, 15.0, 65.0, 70.0, 75.0])
     model.groupdq[0, 2, 0, 0] = JUMP_DET
     model.data[0, :, 0, 1] = ramp * 8 + 3
 
     # Integration 1
-    model.data[1, :, 0, 0] = ramp * 15 + 1
-    model.data[1, :, 0, 1] = ramp * 18 + 9
+    model.data[1, :, 0, 0] = ramp * 5 + 1
+    model.data[1, :, 0, 1] = ramp * 8 + 9
+    print(model.data)
     print(DELIM)
 
     ans = ramp_fit(model, proc_options)
+    print(model.data)
+    print(DELIM)
 
 
 # --------------------------------------------------------------------

@@ -16,6 +16,7 @@ class IntermediateComputations:
         self.orig_dim = data.shape
 
         self.slope_est = None
+        self.max_seg_length = 0
 
 
     def set_stuff(self, stuff):
@@ -62,7 +63,6 @@ class ModelArray:
         self.err = err
         self.groupdq = groupdq
         self.pixeldq = pixeldq
-        self.max_seg_length = 0
 
 
 class RampSegment:

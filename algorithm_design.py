@@ -27,6 +27,9 @@ DO_NOT_USE = dqflags.group["DO_NOT_USE"]
 JUMP_DET = dqflags.group["JUMP_DET"]
 SATURATED = dqflags.group["SATURATED"]
 
+# INTERMEDIATE_DTYPE = np.64float
+INTERMEDIATE_DTYPE = np.float32
+
 DELIM = "-" * 70
 SDELIM = "*" * 70
 
@@ -34,6 +37,123 @@ SDELIM = "*" * 70
 # --------------------------------------------------------------------
 #                        Primary Function
 # --------------------------------------------------------------------
+
+"""
+The primary output product is an ImageModel:
+    A data model for 2D images.
+
+    Parameters
+    __________
+    data : numpy float32 array
+         The science data
+
+    dq : numpy uint32 array
+         Data quality array
+
+    err : numpy float32 array
+         Error array
+
+    zeroframe : numpy float32 array
+         Zeroframe array
+
+    var_poisson : numpy float32 array
+         variance due to poisson noise
+
+    var_rnoise : numpy float32 array
+         variance due to read noise
+
+    area : numpy float32 array
+         Pixel area map array
+
+    pathloss_point : numpy float32 array
+         Pathloss correction for point source
+
+    pathloss_uniform : numpy float32 array
+         Pathloss correction for uniform source
+
+
+ ---> schema_url = "http://stsci.edu/schemas/jwst_datamodel/image.schema"
+
+---------------------------------------------------------------------------
+The rateint output product is a CubeModel
+    A data model for 3D image cubes.
+
+    Parameters
+    __________
+    data : numpy float32 array
+         The science data
+
+    dq : numpy uint32 array
+         Data quality array
+
+    err : numpy float32 array
+         Error array
+
+    zeroframe : numpy float32 array
+         Zero frame array
+
+    area : numpy float32 array
+         Pixel area map array
+
+    int_times : numpy table
+         table of times for each integration
+
+    wavelength : numpy float32 array
+         Wavelength array
+
+    var_poisson : numpy float32 array
+         Integration-specific variances of slope due to Poisson noise
+
+    var_rnoise : numpy float32 array
+         Integration-specific variances of slope due to read noise
+
+
+---> schema_url = "http://stsci.edu/schemas/jwst_datamodel/cube.schema"
+
+---------------------------------------------------------------------------
+The optional results product is a RampFitOutputModel:
+    A data model for the optional output of the ramp fitting step.
+
+    In the parameter definitions below, `n_int` is the number of
+    integrations, `max_seg` is the maximum number of segments that
+    were fit, `nreads` is the number of reads in an integration, and
+    `ny` and `nx` are the height and width of the image.
+
+    Parameters
+    __________
+
+    slope : numpy float32 array (n_int, max_seg, ny, nx)
+        Segment-specific slope
+
+    sigslope : numpy float32 array (n_int, max_seg, ny, nx)
+        Sigma for segment-specific slope
+
+    var_poisson : numpy float32 array (n_int, max_seg, ny, nx)
+        Variance due to poisson noise for segment-specific slope
+
+    var_rnoise : numpy float32 array (n_int, max_seg, ny, nx)
+        Variance due to read noise for segment-specific slope
+
+    yint : numpy float32 array (n_int, max_seg, ny, nx)
+        Segment-specific y-intercept
+
+    sigyint : numpy float32 array (n_int, max_seg, ny, nx)
+        Sigma for segment-specific y-intercept
+
+    pedestal : numpy float32 array (n_int, max_seg, ny, nx)
+        Pedestal array
+
+    weights : numpy float32 array (n_int, max_seg, ny, nx)
+        Weights for segment-specific fits
+
+    crmag : numpy float32 array (n_int, max_seg, ny, nx)
+        Approximate CR magnitudes
+
+
+---> schema_url = "http://stsci.edu/schemas/jwst_datamodel/rampfitoutput.schema"
+"""
+
+
 def ramp_fit(model, proc_options):
     """
     Top level ramp fitting designed for 4-D processing  with dimensions:
@@ -58,14 +178,18 @@ def ramp_fit(model, proc_options):
     optres: TODO
         Flesh out details
     """
+
     icomp = IntermediateComputations(model.data)
     miri_answer = miri_correction(model)
+    # TODO check to make sure there is data left to continue
 
     # Create a model agnostic class that allows for dimension reduction in order to
     # separate across integration computations from within integration computations.
     model_4d = ModelArray(model, model.data, model.err, model.groupdq, model.pixeldq)
 
-    return ramp_fit_4d(model_4d, proc_options, icomp)
+    primary, rateint, optres = ramp_fit_4d(model_4d, proc_options, icomp)
+
+    return primary, rateint, optres
 
 
 # --------------------------------------------------------------------
@@ -95,22 +219,30 @@ def across_integration_ramp_fitting(model, proc_options, icomp):
     optres: TODO
         Flesh out details
     """
+    # This is needed to compute the variance due to Poisson noise and is computed
+    # across all integrations.
     slope_est = compute_slope_est(model, icomp)
 
     primary_int = []
     rateint_int = []
     optres_int = []
-    """
     for integration in range(model.data.shape[0]):
+
+        # Get 3-D cube for the integeration
         model_3d, icomp_3d = get_integration(model, icomp, integration)
+        icomp_3d.slope_est = icomp.slope_est
+
+        # Compute fit and variances on each cube, then save each integration
+        # output to a list.
         primary, rateint, optres = ramp_fit_3d(model_3d, proc_options, icomp_3d)
         primary_int.append(primary)
         rateint_int.append(rateint)
         optres_int.append(optres)
-    """
 
+    # Combine each integration to compute the overall exposure fit and variances.
     primary, rateint, optres = combine_integrations(
-        primary_int, rateint_int, optres_int)
+        primary_int, rateint_int, optres_int
+    )
 
     return primary, rateint, optres
 
@@ -126,10 +258,15 @@ def combine_integrations(primary_int, rateint_int, optres_int):
     optres_int: list
         Contains the optional results for each integration
     """
+    """
     if len(primary_int) == 1:
         return primary_int[0], rateint_int[0], optres_int[0]
+    """
 
     # TODO Combine integration level info into exposure level info
+    # Create exposure level output models
+    # Compute exposure level outputs from integration level computations
+    # Populate exposure level outputs
     return None, None, None
 
 
@@ -240,7 +377,328 @@ def compute_pixel_ramp(model, proc_options, icomp, row, col):
 
     Parameter
     ---------
-    model
+    model: ModelArray
+        Contains 3-D cubes needed for ramp fitting.
+
+    proc_options: dict
+        Contains the processing options.
+
+    icomp: IntermediateComuptations
+        Contains intermediate computations.
+
+    row: int
+        Row of current pixel
+
+    col: int
+        Column of current pixel
+
+    Return
+    ------
+    # TODO - change the return values to be
+    #
+    segments_fit: list
+
+    slope_i: float
+
+    var_ri: float
+
+    var_pi: float
+
+    var_ci: float
+    """
+    ramp = ModelArray(
+        model.orig_model,
+        model.data[:, row, col].astype(
+            INTERMEDIATE_DTYPE
+        ),  # astypes may be overkill here
+        model.err[:, row, col].astype(INTERMEDIATE_DTYPE),
+        model.groupdq[:, row, col],
+        model.pixeldq[row, col],
+    )
+
+    # compute segments
+    segment_fits = compute_segments_fits(ramp, proc_options, icomp, row, col)
+
+    # Use segments to compute integration level ramp fitting
+    var_ri, var_pi, var_ci, num_s, den_s = 0.0, 0.0, 0.0, 0.0, 0.0
+    for seg_fit in segment_fits:
+        slope_s, y_int, var_rs, var_ps, var_cs = seg_fit
+        var_ri += 1.0 / var_rs
+        var_pi += 1.0 / var_ps
+        var_ci += 1.0 / (var_rs + var_ps)
+        num_s += slope_s / var_cs
+        den_s += 1.0 / var_cs
+
+    # Complete integration level computations for the pixel
+    var_ri = 1.0 / var_ri
+    var_pi = 1.0 / var_pi
+    var_ci = 1.0 / var_ci
+    slope_i = num_s / den_s
+
+    return segments_fit, slope_i, var_ri, var_pi, var_ci
+
+
+def compute_segments_fits(ramp, proc_options, icomp, row, col):
+    """
+    Compute the segments in the ramp, then compute the fit of each ramp.
+
+    Parameter
+    ---------
+    ramp: ModelArray
+        Contains the ramp to be fitted.
+
+    proc_options: dict
+        Contains the processing option.
+
+    icomp IntermediateComputation
+        Contains the intermediate computations.
+
+    row: int
+        The row of the current ramp.
+
+    col: int
+        The column of the current ramp.
+
+    Return
+    ------
+    segments_fits: list
+        A list of tuples.  Each tuple corresponds to the fit or each
+        segment in the ramp.
+    """
+    # HERE
+    segments = get_segments(ramp)
+    segments_fits = []
+    """
+    TODO: Add the following loop
+    for seg in segments:
+    """
+    seg = segments[0]
+    seg_fit = compute_segment_fit(seg, ramp, proc_options, icomp, row, col)
+
+    segments_fits.append(seg_fit)
+
+    return segments_fits
+
+
+def compute_segment_fit(seg, ramp, proc_options, icomp, row, col):
+    """
+    Compute the fit for a segment in the ramp.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the first and last group number in the ramp, as well as the length.
+
+    proc_options: dict
+        Contains the processing option.
+
+    icomp IntermediateComputation
+        Contains the intermediate computations.
+
+    row: int
+        The row of the current ramp.
+
+    col: int
+        The column of the current ramp.
+
+    Return
+    ------
+    segment_fit: tuple
+        The computed segment fit.  The tuple contains the slope estimate, y-intercept,
+        variance of the slope due to read noise, variance of the slope due to the
+        Poisson noise, and the combined variance due to noise.
+    """
+    # Check the fitting alorithm to use, either the OLS or GLS algorithm.
+    # Use the key work "algorithm" in proc_options.
+    slope_s, var_rs, var_ps, var_cs = None, None, None, None
+    if seg[2] == 1:
+        slope_s, y_int = compute_segment_slope_len_1(seg, ramp, proc_options)
+        var_rs = compute_segment_rnoise_len_1(seg, ramp, proc_options, row, col)
+        var_ps = compute_segment_pnoise_len_1(seg, ramp, proc_options, icomp, row, col)
+        var_cs = var_rs + var_ps
+
+    elif seg[2] == 2:
+        slope_s, y_int = compute_segment_slope_len_2(seg, ramp, proc_options)
+        var_rs = compute_segment_rnoise_len_2(seg, ramp, proc_options, row, col)
+        var_ps = compute_segment_pnoise_len_2(seg, ramp, proc_options, icomp, row, col)
+        var_cs = var_rs + var_ps
+
+    elif seg[2] > 2:
+        slope_s, y_int = compute_segment_slope_len_3(seg, ramp, proc_options)
+        var_rs = compute_segment_rnoise_len_3(seg, ramp, proc_options, row, col)
+        var_ps = compute_segment_pnoise_len_3(seg, ramp, proc_options, icomp, row, col)
+        var_cs = var_rs + var_ps
+
+    segment_fit = (slope_s, y_int, var_rs, var_ps, var_cs)
+    return segment_fit
+
+
+def compute_segment_slope_len_1(seg, ramp, proc_options):
+    """
+    Compute slope with only one group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    Return
+    ------
+    slope
+    y_int
+    """
+    return None
+
+
+def compute_segment_rnoise_len_1(seg, ramp, proc_options, row, col):
+    """
+    Compute readnoise variance with only one group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    row: int
+        The row of the ramp.
+
+    col: int
+        The column of the ramp.
+
+    Return
+    ------
+    var_rs
+    """
+    return None
+
+
+def compute_segment_pnoise_len_1(seg, ramp, proc_options, icomp, row, col):
+    """
+    Compute Poisson variance with only one group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    row: int
+        The row of the ramp.
+
+    col: int
+        The column of the ramp.
+
+    Return
+    ------
+    var_ps
+    """
+    return None
+
+
+def compute_segment_slope_len_2(seg, ramp, proc_options):
+    """
+    Compute slope with only two group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    Return
+    ------
+    slope
+    y_int
+    """
+    return None
+
+
+def compute_segment_rnoise_len_2(seg, ramp, proc_options, row, col):
+    """
+    Compute read noise variance with only two group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    row: int
+        The row of the ramp.
+
+    col: int
+        The column of the ramp.
+
+    Return
+    ------
+    var_rs
+    """
+    return None
+
+
+def compute_segment_pnoise_len_2(seg, ramp, proc_options, icomp, row, col):
+    """
+    Compute Poisson variance with only two group.
+
+    Parameter
+    ---------
+    seg: tuple
+        Contains the segment information - (first group, last group, segment length).
+
+    ramp: ArrayModel
+        Contains the ramp in which the segment lies.
+
+    proc_options: dict
+        Processing options.
+
+    row: int
+        The row of the ramp.
+
+    col: int
+        The column of the ramp.
+
+    Return
+    ------
+    var_ps
+    """
+    return None
+
+
+def compute_segment_pnoise_len_3(seg, ramp, proc_options, icomp, row, col):
+    """
+    Compute Poisson variance for segments with 3 or more groups.
+
+    Parameter
+    ---------
+    seg
+    ramp
     proc_options
     icomp
     row
@@ -248,28 +706,82 @@ def compute_pixel_ramp(model, proc_options, icomp, row, col):
 
     Return
     ------
+    var_ps
     """
-    # HERE
-    ramp = ModelArray(
-        model,
-        model.data[:, row, col],
-        model.err[:, row, col],
-        model.groupdq[:, row, col],
-        model.pixeldq[row, col],
-    )
+    ng = seg[2]
+    gain = proc_options["gain"].data[row, col]
+    group_time = ramp.orig_model.meta.exposure.group_time
 
-    # compute segments
-    ans = compute_segments_fits(ramp, proc_options, icomp, row, col)
+    var_ps = icomp.slope_est[row, col] / (group_time * gain * (ng - 1))
 
-    # compute overall ramps
-    ans = pixel_fit(ramp, ans, proc_options, icomp, row, col)
-
-    sys.exit(1)
+    return var_ps
 
 
-def compute_segments_fits(ramp, proc_options, icomp, row, col):
-    segments = get_segments(ramp)
-    sys.exit(1)
+def compute_segment_rnoise_len_3(seg, ramp, proc_options, row, col):
+    """
+    Compute readnoise variance for segments with 3 or more groups.
+
+    Parameter
+    ---------
+    seg
+    ramp
+    proc_options
+    row
+    col
+
+    Return
+    ------
+    var_rs
+    """
+    ng = seg[2]  # Number of groups in segment
+    R = proc_options["readnoise"].data[row, col]  # Read noise for pixel
+    group_time = ramp.orig_model.meta.exposure.group_time
+
+    var_rs = 12 * R ** 2 / ((ng ** 3 - ng) * group_time ** 2)
+
+    return var_rs
+
+
+def compute_segment_slope_len_3(seg, ramp, proc_options):
+    """
+    Fit slope to segment of length 3 or greater.
+
+    Parameter
+    ---------
+    seg
+    ramp
+    proc_options
+
+    Return
+    ------
+    slope
+    y_int
+    """
+    ng = seg[2]
+    group_time = ramp.orig_model.meta.exposure.group_time
+    X = np.array([k + 1 for k in range(ng)])
+    X *= group_time
+    Y = ramp.data[seg[0] : seg[1] + 1]
+
+    sum_x = X.sum()
+    sum_xx = (X * X).sum()
+
+    sum_y = Y.sum()
+    sum_yy = (Y * Y).sum()
+
+    sum_xy = (X * Y).sum()
+
+    # Compute the slope and y-intercept
+    cov_xy = sum_xy - (sum_x * sum_y) / ng
+    var_x = sum_xx - (sum_x ** 2) / ng
+
+    slope = cov_xy / var_x
+    y_int = sum_y / ng - slope * sum_x / ng
+
+    # TODO
+    # Do weighted least squares.
+
+    return slope, y_int
 
 
 def compute_slope_est(model, icomp):
@@ -287,9 +799,18 @@ def compute_slope_est(model, icomp):
         The slope estimates using the median differences between groups
         not affected by across all integrations.
     """
+    # Get 4-D dimensions
     number_of_integrations, ngroups, nrows, ncols = model.data.shape
-    slope_est = np.zeros((nrows, ncols))
+
+    # Compute slope estimates over all groups and integrations.  This is a more
+    # robust measure to use when computing the Poisson variance in the slope.
+    slope_est = np.zeros((nrows, ncols), dtype=INTERMEDIATE_DTYPE)
+    icomp.slope_est = slope_est
+
+    # Loop over each integration to do all computations on the 3-D cubes independently.
     for integration in range(number_of_integrations):
+
+        # Get 3-D information from the
         data = model.data[integration, :, :, :]
         groupdq = model.groupdq[integration, :, :, :]
 
@@ -330,13 +851,12 @@ def get_integration(model, icomp, n_int):
         The current integration.
     """
     # Reduce by one dimension
-    data = model.data[n_int, :, :, :]
-    err = model.err[n_int, :, :, :]
+    data = model.data[n_int, :, :, :].astype(INTERMEDIATE_DTYPE)
+    err = model.err[n_int, :, :, :].astype(INTERMEDIATE_DTYPE)
     groupdq = model.groupdq[n_int, :, :, :]
     pixeldq = model.pixeldq
 
     model_3d = ModelArray(model.orig_model, data, err, groupdq, pixeldq)
-
     icomp_3d = IntermediateComputations(model_3d.data)
 
     return model_3d, icomp_3d
@@ -344,8 +864,8 @@ def get_integration(model, icomp, n_int):
 
 def get_row_slices(nrows, num_slices):
     """
-    Create a list with length equal to the number of slices.  Each element in the list is
-    the number of rows to operate on in the original data cube.
+    Create a list with length equal to the number of slices.  Each element in the
+    list is the number of rows to operate on in the original data cube.
 
 
     Parameter
@@ -359,8 +879,8 @@ def get_row_slices(nrows, num_slices):
     Return
     ------
     row_slices: list
-        The list of slices.  The length of the list is equal to the number of slices.  The
-        elements of the list are the number of rows that slice is to process.
+        The list of slices.  The length of the list is equal to the number of slices.
+        The elements of the list are the number of rows that slice is to process.
     """
     rows_per_slice = nrows // num_slices
     remainder = nrows % num_slices
@@ -382,24 +902,37 @@ def get_segments(ramp):
     Need to figure this out.  Are groups labelled as JUMP_DET used or separated?
     How to break up a set of groups into segments?
     """
-    pass
+    max_seg_length = 0
+    segments = []
+    # Examine ramp.groupdq to determine where the segment boundaries are
+    # Get next segment
+    # If segment length is 1 and max_seg_length > 1 discard segment
+    # If segment length is greater than max_seg_length update max_seg_length
+    # If not a discarded length 1 segment, append segment to segments
+
+    # TODO Need to add other cases
+    #      Right now assume the whole ramp is a valid segment.
+    return [(0, len(ramp.data) - 1, len(ramp.data))]
 
 
 def miri_correction(model):
+    """
+    Corrects data accounting for MIRI artifacts.  There is no return value.
+    This function modifies the shape of the model.
+
+    Parameter
+    ---------
+    model: RampModel
+    """
     return None
-
-
-def pixel_fit(ramp, ans, proc_options, icomp, row, col):
-    """
-    Fit segments, then fit use segments to fit overall.
-    """
-    pass
 
 
 def ramp_fit_3d(model, proc_options, icomp):
     """
     Rampfitting a 3-D cube.
 
+    Parameter
+    ---------
     model: ModelArray
         Contains the 3-D cube arrays and the metadata needed for processing.
 
@@ -408,15 +941,23 @@ def ramp_fit_3d(model, proc_options, icomp):
 
     icomp: IntermediateComputations
         The intermediate computations.
-    """
-    # TODO
+
+    Return
+    ------
+    primary: ImageModel
+
+    rateint:
+
+    opt_res:
     """
     ngroups, nrows, ncols = model.data.shape
+    # TODO Create output models
     for row in range(nrows):
         for col in range(ncols):
+            print(f"\n{DELIM}")
+            print(f"    -----> ({row}, {col})")
             ans = compute_pixel_ramp(model, proc_options, icomp, row, col)
-    """
-    ans = compute_pixel_ramp(model, proc_options, icomp, 0, 0)
+            # TODO unpack 'ans' and populate output models
 
     return None, None, None
     # return primary, rateint, opt_res
@@ -499,34 +1040,56 @@ def test_compute_multiprocessing_slices():
     assert num_slices == ncores // 4
 
 
-def test_ramp_fit():
-    proc_options = {"max_cores": "none"}
+def test_ramp_fit_simple_linear_ramp():
 
-    dims = (2, 5, 1, 2)
+    dims = (1, 5, 1, 1)
     model, rnModel, gain = setup_inputs_simplified(dims=dims)
 
-    print(DELIM)
-    print(f"Dimensions = {dims}")
-    print(DELIM)
-    ramp = np.array([k + 1 for k in range(dims[1])])
+    rlist = [k + 1 for k in range(dims[1])]
+    ramp = np.array(rlist)
 
-    # Integration 0
-    model.data[0, :, 0, 0] = np.array([10.0, 15.0, 65.0, 70.0, 75.0])
-    model.groupdq[0, 2, 0, 0] = JUMP_DET
-    model.data[0, :, 0, 1] = ramp * 8 + 3
+    model.data[0, :, 0, 0] = ramp * 5
 
-    # Integration 1
-    model.data[1, :, 0, 0] = ramp * 5 + 1
-    model.data[1, :, 0, 1] = ramp * 8 + 9
-    print(model.data)
+    proc_options = {
+        "max_cores": "none",
+        "opt_save": True,
+        "gain": gain,
+        "readnoise": rnModel,
+    }
+    print(DELIM)
+    primary, rateint, optres = ramp_fit(model, proc_options)
     print(DELIM)
 
-    ans = ramp_fit(model, proc_options)
-    print(model.data)
+
+def test_ramp_fit_small():
+    dims = (2, 5, 2, 2)
+    model, rnModel, gain = setup_inputs_simplified(dims=dims)
+
+    rlist = [k + 1 for k in range(dims[1])]
+    ramp = np.array(rlist)
+    model.data[0, :, 0, 0] = ramp * 5
+    model.data[0, :, 1, 0] = ramp * 2
+    model.data[0, :, 0, 1] = ramp * 7
+    model.data[0, :, 1, 1] = ramp * 1
+
+    model.data[1, :, 0, 0] = ramp * 5 + 2
+    model.data[1, :, 1, 0] = ramp * 2 + 2
+    model.data[1, :, 0, 1] = ramp * 7 + 2
+    model.data[1, :, 1, 1] = ramp * 1 + 2
+
+    proc_options = {
+        "max_cores": "none",
+        "opt_save": True,
+        "gain": gain,
+        "readnoise": rnModel,
+    }
+    print(DELIM)
+    primary, rateint, optres = ramp_fit(model, proc_options)
     print(DELIM)
 
 
 # --------------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_ramp_fit()
+    # test_ramp_fit_simple_linear_ramp()
+    test_ramp_fit_small()

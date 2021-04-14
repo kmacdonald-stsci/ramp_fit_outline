@@ -1,0 +1,47 @@
+These are the suggestions
+
+To further segregate related functions in ols_fit.py, here are some rough groupings of similar functions that you could consider moving into other modules. (This is just based on a quick review, and there is some overlap here - consider this just as a guideline):
+
+Output model-related
+
+def set_output_models( )
+def create_output_models( )
+
+OLS ramp fitting
+
+def ols_ramp_fit_multi( )
+def ols_ramp_fit_sliced()
+def ols_ramp_fit_single()
+
+JWST-specific
+
+def discard_miri_groups( )
+
+Slope fitting
+
+def ramp_fit_slopes( )
+def ramp_fit_compute_variances( )
+def ramp_fit_overall( ) # needs epydoc description
+def calc_slope( )
+
+Perhaps move to utils.py
+
+def calc_power(snr)
+def interpolate_power(snr) # needs epydocs
+
+Fitting particular segments/ramps
+
+def fit_next_segment( )
+def fit_lines( )
+def fit_single_read( )
+def fit_double_read( )
+def fit_1_group( )
+def fit_2_group( )
+def calc_num_seg( )
+
+Calculation of goodness-of-fit parameters
+
+def calc_unwtd_fit( )
+def calc_opt_fit( )
+def calc_unwtd_sums( )
+def calc_opt_sums( )

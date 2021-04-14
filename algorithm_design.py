@@ -7,6 +7,7 @@ https://jwst-pipeline.readthedocs.io/en/latest/jwst/ramp_fitting/description.htm
 
 import multiprocessing
 import sys
+import time
 import warnings
 
 import numpy as np
@@ -17,6 +18,8 @@ from helper_funcs import setup_inputs_simplified
 from algorithm_design_classes import IntermediateComputations
 from algorithm_design_classes import ModelArray
 from algorithm_design_classes import RampSegment
+
+import jwst.datamodels as datamodels
 
 from jwst.datamodels import dqflags
 from jwst.datamodels import GainModel
@@ -264,10 +267,24 @@ def combine_integrations(primary_int, rateint_int, optres_int):
     """
 
     # TODO Combine integration level info into exposure level info
-    # Create exposure level output models
-    # Compute exposure level outputs from integration level computations
-    # Populate exposure level outputs
+    if len(primary_int) == 1:
+        return primary_int[0], rateint_int[0], optres_int[0]
+
+    exp_var_poisson = combine_integrations_variance(primary.var_poisson)
+    exp_var_rnoise = combine_integrations_variance(primary.var_rnoise)
+    exp_var_combined = exp_var_poisson + exp_var_rnoise
+
+    # Compute exposure level slopes
+    # TODO Need to figure out the best way to combine slopes.
+    
     return None, None, None
+
+
+def combine_integrations_variance(var_int):
+    var = 1. / var_int[0]
+    for vint in var_int[1:]:
+        var += (1. / vint)
+    return 1. / var
 
 
 def compute_first_diffs(data, groupdq):
@@ -435,7 +452,7 @@ def compute_pixel_ramp(model, proc_options, icomp, row, col):
     var_ci = 1.0 / var_ci
     slope_i = num_s / den_s
 
-    return segments_fit, slope_i, var_ri, var_pi, var_ci
+    return segment_fits, slope_i, var_ri, var_pi, var_ci
 
 
 def compute_segments_fits(ramp, proc_options, icomp, row, col):
@@ -839,6 +856,41 @@ def compute_slope_est(model, icomp):
     return slope_est
 
 
+def create_output_products_3d(model, save_opt):
+    """
+    Create empty primary and intrate products.  Ultimately need to create
+    the optional results product.
+
+    model: RampModel
+        
+
+    save_opt: bool
+        TODO (Unused for now)
+        
+    """
+    ngroups, nrows, ncols = model.data.shape
+
+    imshape = (nrows, ncols)
+    primary = datamodels.ImageModel(data=np.zeros(imshape, dtype=INTERMEDIATE_DTYPE),
+                                    dq=np.zeros(imshape, dtype=INTERMEDIATE_DTYPE),
+                                    var_poisson=np.zeros(imshape, dtype=INTERMEDIATE_DTYPE),
+                                    var_rnoise=np.zeros(imshape, dtype=INTERMEDIATE_DTYPE),
+                                    err=np.zeros(imshape, dtype=INTERMEDIATE_DTYPE))
+
+    cubeshape = (ngroups, nrows, ncols)
+    intrates = datamodels.CubeModel(
+        data=np.zeros(cubeshape, dtype=INTERMEDIATE_DTYPE),
+        dq=np.zeros(cubeshape, dtype=INTERMEDIATE_DTYPE),
+        var_poisson=np.zeros(cubeshape, dtype=INTERMEDIATE_DTYPE),
+        var_rnoise=np.zeros(cubeshape, dtype=INTERMEDIATE_DTYPE),
+        err=np.zeros(cubeshape, dtype=INTERMEDIATE_DTYPE))
+    intrates.int_times = None
+
+    optional_results = None
+    # TODO Need to create a zero optional result model.
+
+    return primary, intrates, optional_results
+
 def get_integration(model, icomp, n_int):
     """
     model: ModelArray
@@ -902,17 +954,50 @@ def get_segments(ramp):
     Need to figure this out.  Are groups labelled as JUMP_DET used or separated?
     How to break up a set of groups into segments?
     """
-    max_seg_length = 0
-    segments = []
-    # Examine ramp.groupdq to determine where the segment boundaries are
-    # Get next segment
-    # If segment length is 1 and max_seg_length > 1 discard segment
-    # If segment length is greater than max_seg_length update max_seg_length
-    # If not a discarded length 1 segment, append segment to segments
+    max_seg_length, one_length_seg, segments = 0, False, []
+    dq = ramp.groupdq
 
-    # TODO Need to add other cases
-    #      Right now assume the whole ramp is a valid segment.
-    return [(0, len(ramp.data) - 1, len(ramp.data))]
+    # Examine ramp.groupdq to determine where the segment boundaries are
+    start_seg = -1
+    for k in range(len(dq)):
+        if (dq[k] & JUMP_DET) or (dq[k] & DO_NOT_USE):
+            if start_seg == -1:
+                continue
+            else:
+                end = k-1
+                seg = (start_seg, end, end - start_seg + 1)
+                if max_seg_length < seg[2]:
+                    max_seg_length = seg[2]
+                if seg[2] == 1:
+                    one_length_seg = True
+                start_seg = -1
+                if (seg[2] == 1 and max_seg_length < 1) or seg[2] > 1:
+                    segments.append(seg)
+        else:
+            if start_seg == -1:
+                start_seg = k
+
+    # The last segment could be the last groups of the branch
+    if start_seg != -1:
+        end = len(dq) - 1
+        seg = (start_seg, end, end-start_seg + 1)
+        if max_seg_length < seg[2]:
+            max_seg_length = seg[2]
+        if seg[2] == 1:
+            one_length_seg = True
+        if (seg[2] == 1 and max_seg_length < 1) or seg[2] > 1:
+            segments.append(seg)
+
+    # If a segemnt has more than one group, all segments with only
+    # one group are ignored.
+    if one_length_seg and max_seg_length > 1:
+        for seg in segments:
+            if seg[2] == 1:
+                segments.remove(seg)
+
+    # TODO Testing segment - remove later
+    # segments = [(0, len(ramp.data) - 1, len(ramp.data))] 
+    return segments
 
 
 def miri_correction(model):
@@ -950,17 +1035,36 @@ def ramp_fit_3d(model, proc_options, icomp):
 
     opt_res:
     """
+    try:
+        save_opt = proc_options["save_opt"]
+    except:
+        save_opt = False
+
     ngroups, nrows, ncols = model.data.shape
-    # TODO Create output models
+    primary, rateints, optional_result = create_output_products_3d(model, save_opt)
     for row in range(nrows):
         for col in range(ncols):
-            print(f"\n{DELIM}")
-            print(f"    -----> ({row}, {col})")
-            ans = compute_pixel_ramp(model, proc_options, icomp, row, col)
-            # TODO unpack 'ans' and populate output models
+            # print(f"\n{DELIM}")
+            # print(f"    -----> ({row}, {col})")
+            segment_fits, slope_i, var_ri, var_pi, var_ci = compute_pixel_ramp(
+                model, proc_options, icomp, row, col)
 
-    return None, None, None
-    # return primary, rateint, opt_res
+            primary.data[row, col] = slope_i
+            primary.var_poisson[row, col] = var_pi
+            primary.var_rnoise[row, col] = var_ri
+            # primary.err[row, col] = TODO ?
+
+    '''
+    print(DELIM)
+    print(f"slopes = \n{primary.data}")
+    print(DELIM)
+    print(f"Poisson = \n{primary.var_poisson}")
+    print(DELIM)
+    print(f"rnoise = \n{primary.var_rnoise}")
+    print(DELIM)
+    '''
+
+    return primary, rateints, optional_result
 
 
 def ramp_fit_4d(model, proc_options, icomp):
@@ -1009,6 +1113,16 @@ def ramp_fit_4d_multi(model, proc_options, icomp, num_slices):
 
 
 # --------------------------------------------------------------------
+def default_proc_opt(gain=None, rnModel=None, save_opt=False, max_cores="none"):
+    proc_options = {
+        "max_cores": max_cores,
+        "save_opt": save_opt,
+        "gain": gain,
+        "readnoise": rnModel,
+    }
+    return proc_options
+
+
 def test_get_row_slices():
     nrows = 105
     nslices = 10
@@ -1088,8 +1202,53 @@ def test_ramp_fit_small():
     print(DELIM)
 
 
+def test_ramp_multi_segment():
+
+    dims = (1, 10, 1, 1)
+    model, rnModel, gain = setup_inputs_simplified(dims=dims)
+
+    rlist = [5,   10,  15, 
+             50,  55,  60, 
+             100, 105, 110, 115]
+    ramp = np.array(rlist)
+    model.data[0, :, 0, 0] = ramp
+
+    model.groupdq[0, 3, 0, 0] = JUMP_DET
+    model.groupdq[0, 6, 0, 0] = JUMP_DET
+    model.groupdq[0, 8, 0, 0] = DO_NOT_USE
+
+    proc_options = default_proc_opt(gain=gain, rnModel=rnModel)
+
+    print(DELIM)
+    primary, rateint, optres = ramp_fit(model, proc_options)
+    print(DELIM)
+
+
+def test_ramp_simple_mid_size():
+
+    dims = (1, 10, 500, 500)
+    model, rnModel, gain = setup_inputs_simplified(dims=dims)
+
+    rlist = [k+1 for k in range(dims[1])]
+    flen = 100
+    factors = [0.5 * (k+1) for k in range(flen)]
+    for r in range(dims[2]):
+        for c in range(dims[3]):
+            idx = (c * r + c) % flen
+            factor = factors[idx]
+            model.data[0, :, r, c] = np.array(rlist) * factor
+
+    proc_options = default_proc_opt(gain=gain, rnModel=rnModel)
+
+    start = time.time()
+    print(DELIM)
+    primary, rateint, optres = ramp_fit(model, proc_options)
+    end = time.time()
+    tot_time = end - start
+    print(f"Time = {tot_time}")
+    print(DELIM)
+
 # --------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # test_ramp_fit_simple_linear_ramp()
-    test_ramp_fit_small()
+    test_ramp_simple_mid_size()
